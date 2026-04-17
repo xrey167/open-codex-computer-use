@@ -14,14 +14,18 @@
 
 ## 授权与最小权限
 
-- 当前还没有官方闭源实现里的 session approval / app allowlist。
+- 当前已经补上一层官方风格的高风险 bundle denylist / bundle-id gate：
+  - 会阻止对终端类 app、密码管理器、Chrome 和少量系统敏感组件做直接 `get_app_state` / action 调用。
+  - 对 bundle identifier 直传时返回 safety denial；对 app name 查询时默认不把这些高风险 app 暴露成可解析目标。
+- 但当前仍然没有官方闭源实现里的 session approval / 动态 app allowlist。
 - 这意味着开源版当前的安全边界主要由：
   - 明确的 tool 调用参数
+  - 内置高风险 denylist
   - 宿主进程权限
   - 本地使用场景
   共同提供。
 - 下一阶段应优先补：
-  - app allowlist
+  - 用户可配置的 app allowlist / policy
   - session 级审批
   - 更清楚的高风险 app / 系统设置防护策略
 

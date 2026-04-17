@@ -48,9 +48,10 @@
 ### 3. Tool Service 层
 
 - `ComputerUseService` 负责把 MCP tool 请求映射到本地能力。
-- `list_apps` 通过 `NSWorkspace` 枚举运行中的 app。
+- `list_apps` 通过 Spotlight metadata query 拉取标准 application 目录里的 app bundle，并读取 `kMDItemUseCount` / `kMDItemLastUsedDate_Ranking` 这类系统元数据；再与 `NSWorkspace` 的运行态 app 合并，输出“当前运行中 + 近 14 天用过”的视图。
 - `get_app_state` 优先走真实 AX / 窗口截图，但不再为了读状态而显式 `activate` 目标 app；当目标是仓库内 fixture app 时，回退到 fixture 导出的合成状态。
 - MCP `tools/list` 的 description / input schema 当前按官方 `computer-use` 的 9 个 tools 文案和参数面收敛，尽量减少 host 侧提示词和 tool surface 偏差。
+- 对真实 app 的 `get_app_state` / action tool 入口，当前新增了一层官方风格的高风险 bundle denylist：bundle-id 直传时直接返回 safety denial；名称匹配时默认不解析到这些 app，尽量贴近官方对终端、密码管理器、Chrome 与少量系统敏感组件的防护行为。
 - 普通 app 的 element frame 当前按“窗口左上角为原点”的 window-relative 坐标输出，便于后续把 `element_index` 和截图坐标统一到同一套参考系。
 - `click` 在执行真实动作前后，会额外驱动一层透明 `SoftwareCursorOverlay` window：移动阶段走曲线动画，点击阶段做 pulse，动作结束后只保留一小段停驻与轻微 sway，随后自动淡出。
 - overlay 的 visual style 优先在运行时从本机官方 `Codex Computer Use.app` 的 `Package_ComputerUse.bundle` / `Package_SlimCore.bundle` 读取 `SoftwareCursor` 资产并做一次本地处理；如果本机没有这份 bundle，则回退到仓库内的矢量样式。

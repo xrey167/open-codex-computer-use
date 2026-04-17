@@ -10,6 +10,7 @@
 - 截图策略：`get_app_state`、`click`、`scroll`、`drag` 等调用都会在工具 UI 中附带截图；文档里只保留文本响应，不嵌入截图。
 - 测试 app：`Finder`、`Activity Monitor`、`System Settings`。
 - 安全边界：只选择了目录选择、搜索框输入、滚动、分隔条拖拽这类低风险动作，没有切换系统权限开关，也没有双击打开文件。
+- 2026-04-17 晚些时候再次核对后确认：直接看 MCP tool `content[0].text` 时，官方文本是从 `App=...` 起头的；这里早先保留下来的 `Computer Use state (CUA App Version: 750)` / `<app_state>` 包裹不应再视为当前官方基线。
 
 ## `list_apps`
 
@@ -94,8 +95,6 @@ Request
 Response excerpt
 
 ```text
-Computer Use state (CUA App Version: 750)
-<app_state>
 App=com.apple.finder (pid 1106)
 Window: "open-codex-computer-use", App: Finder.
     0 standard window open-codex-computer-use, ID: FinderWindow, Secondary Actions: Raise
@@ -110,7 +109,6 @@ Window: "open-codex-computer-use", App: Finder.
                     119 row (selectable, collapsed) Secondary Actions: Expand
                     130 row (selected)
 ...
-</app_state>
 ```
 
 ### Sample 2
@@ -126,8 +124,6 @@ Request
 Response excerpt
 
 ```text
-Computer Use state (CUA App Version: 750)
-<app_state>
 App=com.apple.ActivityMonitor (pid 988)
 Window: "Activity Monitor", App: Activity Monitor.
     0 standard window Activity Monitor – All Processes, Secondary Actions: Raise
@@ -144,7 +140,6 @@ Window: "Activity Monitor", App: Activity Monitor.
                 48 button search
 ...
 The focused UI element is 2 outline.
-</app_state>
 ```
 
 ### Sample 3
@@ -160,8 +155,6 @@ Request
 Response excerpt
 
 ```text
-Computer Use state (CUA App Version: 750)
-<app_state>
 App=com.apple.systempreferences (pid 73431)
 Window: "Screen & System Audio Recording", App: System Settings.
     0 standard window Screen & System Audio Recording, ID: main, Secondary Actions: Raise
@@ -177,7 +170,6 @@ Window: "Screen & System Audio Recording", App: System Settings.
                     63 row (selectable) Codex Computer Use
                         64 switch Value: on, ID: Codex Computer Use_Toggle
 ...
-</app_state>
 ```
 
 额外边界样本：

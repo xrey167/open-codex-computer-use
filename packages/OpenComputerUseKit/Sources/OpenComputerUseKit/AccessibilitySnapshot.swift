@@ -36,6 +36,7 @@ public struct AppSnapshot {
     let mode: SnapshotMode
     let treeLines: [String]
     let focusedSummary: String?
+    let selectedText: String?
 
     let elements: [Int: ElementRecord]
 
@@ -45,22 +46,19 @@ public struct AppSnapshot {
 
     public func renderedText(style: SnapshotTextStyle) -> String {
         var lines: [String] = []
+        let displayTitle = displayWindowTitle(windowTitle, appName: app.name)
+        let appReference = app.bundleIdentifier ?? app.name
 
-        if style == .fullState {
-            lines.append("Computer Use state (Open Computer Use 0.1.0)")
-            lines.append("<app_state>")
-        }
-
-        lines.append("App=\(app.bundleIdentifier ?? app.name) (pid \(app.pid))")
-        lines.append("Window: \(quoted(windowTitle ?? "")), App: \(app.name).")
+        lines.append("App=\(appReference) (pid \(app.pid))")
+        lines.append("Window: \(quoted(displayTitle)), App: \(app.name).")
         lines.append(contentsOf: treeLines)
 
-        if let focusedSummary {
+        if let selectedText, !selectedText.isEmpty {
+            lines.append("")
+            lines.append("Selected text: [\(selectedText)]")
+        } else if let focusedSummary {
+            lines.append("")
             lines.append("The focused UI element is \(focusedSummary).")
-        }
-
-        if style == .fullState {
-            lines.append("</app_state>")
         }
 
         return lines.joined(separator: "\n")
@@ -94,6 +92,7 @@ enum SnapshotBuilder {
         let windowBounds = windowCapture?.bounds
         let screenshotPNGData = windowCapture?.pngDataIfAvailable()
         let focusedElement = preferredFocusedElement(appElement: appElement, appPID: app.pid, focusedApplication: focusedApplication, systemWide: systemWide)
+        let selectedText = focusedElement.flatMap(copySelectedText(_:))
         let context = RenderContext(windowBounds: windowBounds, focusedElement: focusedElement)
 
         var renderer = TreeRenderer(context: context)
@@ -109,6 +108,7 @@ enum SnapshotBuilder {
             mode: .accessibility,
             treeLines: renderer.lines,
             focusedSummary: renderer.focusedSummary,
+            selectedText: selectedText,
             elements: renderer.records
         )
     }
@@ -182,6 +182,7 @@ enum SnapshotBuilder {
             mode: .fixture,
             treeLines: lines,
             focusedSummary: focusedSummary,
+            selectedText: nil,
             elements: records
         )
     }
@@ -280,31 +281,77 @@ private struct TreeRenderer {
         }
 
         let index = nextIndex
-        nextIndex += 1
 
         let role = stringValue(of: root, attribute: kAXRoleAttribute) ?? "AXUnknown"
         let subrole = stringValue(of: root, attribute: kAXSubroleAttribute)
-        let title = stringValue(of: root, attribute: kAXTitleAttribute)
+        let baseRoleText = roleDescription(of: root, role: role, subrole: subrole)
         let label = stringValue(of: root, attribute: kAXDescriptionAttribute)
+        let help = stringValue(of: root, attribute: kAXHelpAttribute)
         let value = sanitizedValue(of: root)
-        let axIdentifier = stringValue(of: root, attribute: kAXIdentifierAttribute)
+        let axIdentifier = displayIdentifier(stringValue(of: root, attribute: kAXIdentifierAttribute))
         let traits = summarizeTraits(of: root)
         let actions = copyActions(root) ?? []
-        let prettyActions = actions
-            .filter { $0 != kAXPressAction as String }
-            .map(prettyActionName(_:))
+        let prettyActions = meaningfulActions(actions, role: role)
         let localFrame = resolveLocalFrame(of: root, windowBounds: context.windowBounds)
+        let rowTexts = role == kAXRowRole as String ? flattenedRowTexts(of: root) : []
+        let childElements = children(of: root)
+        let title = preferredDisplayTitle(
+            for: root,
+            role: role,
+            label: label,
+            identifier: axIdentifier,
+            explicitValue: value,
+            rowTexts: rowTexts
+        )
+        let inlineRowSummary = outlineRowSummary(for: root, role: role)
+        let hidesChildren = shouldSuppressChildren(
+            role: role,
+            title: title,
+            label: label,
+            help: help,
+            value: value,
+            identifier: axIdentifier,
+            traits: traits,
+            actions: prettyActions,
+            children: childElements
+        )
+        let roleText = displayRoleText(
+            baseRoleText: baseRoleText,
+            role: role,
+            title: title,
+            label: label,
+            suppressChildren: hidesChildren
+        )
 
-        let roleText = humanizeRole(role: role, subrole: subrole)
-        let titleSegment = title.map { " \($0)" } ?? ""
+        if shouldElideNode(role: role, title: title, label: label, value: value, identifier: axIdentifier, traits: traits, actions: prettyActions, childCount: childElements.count) {
+            for child in childElements {
+                render(child, depth: depth)
+            }
+            return
+        }
+
+        nextIndex += 1
+
         let traitsSegment = traits.isEmpty ? "" : " (\(traits.joined(separator: ", ")))"
-        let labelSegment = label.map { " Description: \($0)" } ?? ""
-        let identifierSegment = axIdentifier.map { " ID: \($0)" } ?? ""
-        let valueSegment = value.map { " Value: \($0)" } ?? ""
-        let actionsSegment = prettyActions.isEmpty ? "" : " Secondary Actions: \(prettyActions.joined(separator: ", "))"
-        let frameSegment = localFrame.map { " Frame: \($0.renderedLocalFrame)" } ?? ""
+        let titleSegment = title.map { " \($0)" } ?? ""
+        let rowSummarySegment = inlineRowSummary.map { " \($0)" } ?? ""
+        let labelSegment = label != nil && label != title ? " Description: \(label!)" : ""
+        let helpSegment = {
+            guard let help else {
+                return ""
+            }
+            if help == title || help == label {
+                return ""
+            }
+            return ", Help: \(help)"
+        }()
+        let identifierSegment = displayIdentifierSegment(for: root, role: role, identifier: axIdentifier, title: title)
+        let valueSegment = formattedValueSegment(for: root, roleText: roleText, title: title, value: value)
+        let actionsPrefix = (title != nil || inlineRowSummary != nil) ? ", Secondary Actions: " : " Secondary Actions: "
+        let actionsSegment = prettyActions.isEmpty ? "" : "\(actionsPrefix)\(prettyActions.joined(separator: ", "))"
+        let linePrefix = roleText.isEmpty ? "\(index)" : "\(index) \(roleText)"
 
-        lines.append("\(String(repeating: "    ", count: depth))\(index) \(roleText)\(titleSegment)\(traitsSegment)\(labelSegment)\(identifierSegment)\(valueSegment)\(actionsSegment)\(frameSegment)")
+        lines.append("\(String(repeating: "\t", count: depth + 1))\(linePrefix)\(traitsSegment)\(titleSegment)\(rowSummarySegment)\(labelSegment)\(helpSegment)\(identifierSegment)\(valueSegment)\(actionsSegment)")
 
         let record = ElementRecord(
             index: index,
@@ -321,10 +368,21 @@ private struct TreeRenderer {
         }
 
         if let focusedElement = context.focusedElement, CFEqual(focusedElement, root) {
-            focusedSummary = "\(index) \(roleText)"
+            focusedSummary = roleText.isEmpty ? "\(index)" : "\(index) \(roleText)"
         }
 
-        for child in children(of: root) {
+        if role == kAXRowRole as String, boolValue(of: root, attribute: kAXSelectedAttribute) != true {
+            for text in Array(rowTexts.dropFirst()) {
+                lines.append(text)
+            }
+            return
+        }
+
+        if hidesChildren {
+            return
+        }
+
+        for child in childElements {
             render(child, depth: depth + 1)
         }
     }
@@ -339,9 +397,20 @@ private struct TreeRenderer {
         var seen: Set<String> = []
 
         for attribute in attributes {
-            guard let values = copyArray(element, attribute: attribute) else {
+            guard let sourceValues = copyArray(element, attribute: attribute) else {
                 continue
             }
+
+            if attribute == kAXChildrenAttribute,
+               let rows = copyArray(element, attribute: kAXRowsAttribute),
+               !rows.isEmpty
+            {
+                continue
+            }
+
+            let values = attribute == kAXRowsAttribute
+                ? visibleRows(in: sourceValues, parent: element)
+                : sourceValues
 
             for child in values {
                 let id = opaqueIdentifier(for: child)
@@ -358,27 +427,47 @@ private struct TreeRenderer {
 private func summarizeTraits(of element: AXUIElement) -> [String] {
     var values: [String] = []
 
-    if boolValue(of: element, attribute: kAXFocusedAttribute) == true {
-        values.append("focused")
+    if let selected = boolValue(of: element, attribute: kAXSelectedAttribute) {
+        values.append(selected ? "selected" : "selectable")
     }
 
-    if boolValue(of: element, attribute: kAXSelectedAttribute) == true {
-        values.append("selected")
+    if let expanded = boolValue(of: element, attribute: kAXExpandedAttribute) {
+        values.append(expanded ? "expanded" : "collapsed")
     }
 
-    if boolValue(of: element, attribute: kAXExpandedAttribute) == true {
-        values.append("expanded")
+    if boolValue(of: element, attribute: kAXEnabledAttribute) == false {
+        values.append("disabled")
     }
 
     if isSettable(of: element, attribute: kAXValueAttribute) {
         values.append("settable")
     }
 
-    if let role = stringValue(of: element, attribute: kAXRoleAttribute), role == kAXTextFieldRole as String {
-        values.append("string")
+    if let valueType = valueTypeTrait(of: element) {
+        values.append(valueType)
     }
 
     return values
+}
+
+private func valueTypeTrait(of element: AXUIElement) -> String? {
+    guard isSettable(of: element, attribute: kAXValueAttribute) else {
+        return nil
+    }
+
+    guard let value = attributeValue(of: element, attribute: kAXValueAttribute) else {
+        return nil
+    }
+
+    if CFGetTypeID(value) == CFStringGetTypeID() {
+        return "string"
+    }
+
+    if value is NSNumber {
+        return "float"
+    }
+
+    return nil
 }
 
 private func copyElement(_ element: AXUIElement, attribute: String) -> AXUIElement? {
@@ -411,10 +500,18 @@ private func copyActions(_ element: AXUIElement) -> [String]? {
     return actions as? [String]
 }
 
-private func stringValue(of element: AXUIElement, attribute: String) -> String? {
+private func attributeValue(of element: AXUIElement, attribute: String) -> CFTypeRef? {
     var value: CFTypeRef?
     let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-    guard error == .success, let value else {
+    guard error == .success else {
+        return nil
+    }
+
+    return value
+}
+
+private func stringValue(of element: AXUIElement, attribute: String) -> String? {
+    guard let value = attributeValue(of: element, attribute: attribute) else {
         return nil
     }
 
@@ -425,10 +522,17 @@ private func stringValue(of element: AXUIElement, attribute: String) -> String? 
     return nil
 }
 
+private func copySelectedText(_ element: AXUIElement) -> String? {
+    guard let value = stringValue(of: element, attribute: kAXSelectedTextAttribute) else {
+        return nil
+    }
+
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
 private func boolValue(of element: AXUIElement, attribute: String) -> Bool? {
-    var value: CFTypeRef?
-    let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-    guard error == .success, let value else {
+    guard let value = attributeValue(of: element, attribute: attribute) else {
         return nil
     }
 
@@ -452,9 +556,7 @@ private func sanitizedValue(of element: AXUIElement) -> String? {
         return sanitizeText(string)
     }
 
-    var value: CFTypeRef?
-    let error = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
-    guard error == .success, let value else {
+    guard let value = attributeValue(of: element, attribute: kAXValueAttribute) else {
         return nil
     }
 
@@ -463,6 +565,86 @@ private func sanitizedValue(of element: AXUIElement) -> String? {
     }
 
     return nil
+}
+
+private func preferredDisplayTitle(
+    for element: AXUIElement,
+    role: String,
+    label: String?,
+    identifier: String?,
+    explicitValue: String?,
+    rowTexts: [String]
+) -> String? {
+    if let title = stringValue(of: element, attribute: kAXTitleAttribute), !title.isEmpty {
+        return sanitizeText(title)
+    }
+
+    if role == kAXRowRole as String {
+        return rowTexts.first
+    }
+
+    if (role == kAXOutlineRole as String || role == kAXListRole as String), let identifier {
+        return identifier
+    }
+
+    if (role == kAXButtonRole as String || role == kAXPopUpButtonRole as String), let label, !label.isEmpty {
+        return sanitizeText(label)
+    }
+
+    guard roleDescription(of: element, role: role, subrole: stringValue(of: element, attribute: kAXSubroleAttribute)) == "search text field" else {
+        return nil
+    }
+
+    return explicitValue
+}
+
+private func outlineRowSummary(for element: AXUIElement, role: String) -> String? {
+    guard role == kAXOutlineRole as String || role == kAXListRole as String else {
+        return nil
+    }
+
+    guard let allRows = copyArray(element, attribute: kAXRowsAttribute), !allRows.isEmpty else {
+        return nil
+    }
+
+    let visibleRows = visibleRows(in: allRows, parent: element)
+    guard !visibleRows.isEmpty, visibleRows.count < allRows.count else {
+        return nil
+    }
+
+    return "(showing 0-\(visibleRows.count - 1) of \(allRows.count) items)"
+}
+
+private func formattedValueSegment(for element: AXUIElement, roleText: String, title: String?, value: String?) -> String {
+    guard let value, !value.isEmpty else {
+        return ""
+    }
+
+    if roleText == "search text field", title == value {
+        return ""
+    }
+
+    if title == nil, let role = stringValue(of: element, attribute: kAXRoleAttribute), role == kAXStaticTextRole as String {
+        return " \(value)"
+    }
+
+    if ["scroll bar", "value indicator"].contains(roleText) {
+        return " \(value)"
+    }
+
+    return " Value: \(value)"
+}
+
+private func displayIdentifierSegment(for element: AXUIElement, role: String, identifier: String?, title: String?) -> String {
+    guard let identifier else {
+        return ""
+    }
+
+    if (role == kAXOutlineRole as String || role == kAXListRole as String), title == identifier {
+        return ""
+    }
+
+    return " ID: \(identifier)"
 }
 
 private func resolveLocalFrame(of element: AXUIElement, windowBounds: CGRect?) -> CGRect? {
@@ -496,6 +678,84 @@ private func resolveLocalFrame(of element: AXUIElement, windowBounds: CGRect?) -
     return windowRelativeFrame(elementFrame: frame, windowBounds: windowBounds)
 }
 
+private func shouldElideNode(
+    role: String,
+    title: String?,
+    label: String?,
+    value: String?,
+    identifier: String?,
+    traits: [String],
+    actions: [String],
+    childCount: Int
+) -> Bool {
+    guard childCount == 1 else {
+        return false
+    }
+
+    let genericRoles = [kAXGroupRole as String, kAXUnknownRole as String]
+    guard genericRoles.contains(role) else {
+        return false
+    }
+
+    return title == nil
+        && label == nil
+        && value == nil
+        && identifier == nil
+        && traits.isEmpty
+        && actions.isEmpty
+}
+
+private func shouldSuppressChildren(
+    role: String,
+    title: String?,
+    label: String?,
+    help: String?,
+    value: String?,
+    identifier: String?,
+    traits: [String],
+    actions: [String],
+    children: [AXUIElement]
+) -> Bool {
+    guard role == kAXGroupRole as String else {
+        return false
+    }
+
+    guard
+        title == nil,
+        label == nil,
+        help == nil,
+        value == nil,
+        identifier == nil,
+        traits.isEmpty,
+        actions.isEmpty,
+        !children.isEmpty
+    else {
+        return false
+    }
+
+    return children.allSatisfy { child in
+        stringValue(of: child, attribute: kAXRoleAttribute) == kAXStaticTextRole as String
+    }
+}
+
+private func displayRoleText(
+    baseRoleText: String,
+    role: String,
+    title: String?,
+    label: String?,
+    suppressChildren: Bool
+) -> String {
+    if suppressChildren {
+        return "container"
+    }
+
+    if baseRoleText == "radio group", role == kAXRadioGroupRole as String, title == nil, label != nil {
+        return ""
+    }
+
+    return baseRoleText
+}
+
 func windowRelativeFrame(elementFrame: CGRect, windowBounds: CGRect) -> CGRect {
     CGRect(
         x: elementFrame.minX - windowBounds.minX,
@@ -505,12 +765,45 @@ func windowRelativeFrame(elementFrame: CGRect, windowBounds: CGRect) -> CGRect {
     )
 }
 
-private func humanizeRole(role: String, subrole: String?) -> String {
+private func roleDescription(of element: AXUIElement, role: String, subrole: String?) -> String {
+    if role == kAXRowRole as String {
+        return "row"
+    }
+
+    if let roleDescription = stringValue(of: element, attribute: kAXRoleDescriptionAttribute), !roleDescription.isEmpty {
+        return roleDescription.lowercased()
+    }
+
     if let subrole, subrole == kAXStandardWindowSubrole as String {
         return "standard window"
     }
 
     return humanizeAXToken(role)
+}
+
+private func meaningfulActions(_ values: [String], role: String) -> [String] {
+    values
+        .filter {
+            ![
+                kAXPressAction as String,
+                "AXShowDefaultUI",
+                "AXShowAlternateUI",
+                "AXShowMenu",
+                "AXConfirm",
+            ].contains($0)
+        }
+        .filter {
+            guard role == kAXScrollAreaRole as String else {
+                return true
+            }
+
+            if values.contains("AXScrollUpByPage") || values.contains("AXScrollDownByPage") {
+                return $0 != "AXScrollLeftByPage" && $0 != "AXScrollRightByPage"
+            }
+
+            return true
+        }
+        .map(prettyActionName(_:))
 }
 
 private func prettyActionName(_ value: String) -> String {
@@ -547,12 +840,88 @@ private func sanitizeText(_ value: String) -> String {
     return collapsed
 }
 
-private func quoted(_ value: String) -> String {
-    "\"\(value)\""
+private func flattenedRowTexts(of element: AXUIElement) -> [String] {
+    let cells = copyArray(element, attribute: kAXChildrenAttribute) ?? []
+    let texts = cells
+        .flatMap { descendantTexts(of: $0) }
+        .map(sanitizeText)
+        .filter { !$0.isEmpty }
+
+    var unique: [String] = []
+    var seen: Set<String> = []
+    for text in texts {
+        if seen.insert(text).inserted {
+            unique.append(text)
+        }
+    }
+
+    return unique
 }
 
-private func format(rect: CGRect) -> String {
-    "x=\(Int(rect.origin.x)), y=\(Int(rect.origin.y)), w=\(Int(rect.width)), h=\(Int(rect.height))"
+private func descendantTexts(of element: AXUIElement, depth: Int = 0) -> [String] {
+    guard depth < 4 else {
+        return []
+    }
+
+    var values: [String] = []
+    let role = stringValue(of: element, attribute: kAXRoleAttribute) ?? ""
+    if role == kAXStaticTextRole as String || role == kAXTextFieldRole as String {
+        if let value = sanitizedValue(of: element) {
+            values.append(value)
+        } else if let title = stringValue(of: element, attribute: kAXTitleAttribute) {
+            values.append(sanitizeText(title))
+        }
+    }
+
+    for child in copyArray(element, attribute: kAXChildrenAttribute) ?? [] {
+        values.append(contentsOf: descendantTexts(of: child, depth: depth + 1))
+    }
+
+    return values
+}
+
+private func visibleRows(in rows: [AXUIElement], parent: AXUIElement) -> [AXUIElement] {
+    guard let parentFrame = resolveLocalFrame(of: parent, windowBounds: nil) else {
+        return Array(rows.prefix(20))
+    }
+
+    let visible = rows.filter { row in
+        guard let rowFrame = resolveLocalFrame(of: row, windowBounds: nil) else {
+            return false
+        }
+
+        return rowFrame.intersects(parentFrame)
+    }
+
+    if visible.isEmpty {
+        return Array(rows.prefix(20))
+    }
+
+    return Array(visible.prefix(20))
+}
+
+private func displayIdentifier(_ value: String?) -> String? {
+    guard let value, !value.isEmpty, !value.hasPrefix("_NS:") else {
+        return nil
+    }
+
+    return value
+}
+
+private func displayWindowTitle(_ value: String?, appName: String) -> String {
+    guard let value, !value.isEmpty else {
+        return appName
+    }
+
+    if value.hasPrefix("\(appName) –") {
+        return appName
+    }
+
+    return value
+}
+
+private func quoted(_ value: String) -> String {
+    "\"\(value)\""
 }
 
 private extension CGRect {

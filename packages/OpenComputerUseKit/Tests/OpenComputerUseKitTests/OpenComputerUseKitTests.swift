@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import OpenComputerUseKit
 
@@ -14,10 +15,23 @@ final class OpenComputerUseKitTests: XCTestCase {
 
     func testInitializeResponseContainsToolsCapability() throws {
         let server = StdioMCPServer(service: ComputerUseService())
-        let response = server.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"0.1.1"},"capabilities":{}}}"#)
+        let response = server.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"0.1.2"},"capabilities":{}}}"#)
         XCTAssertNotNil(response)
         XCTAssertTrue(response!.contains(#""name":"open-computer-use""#))
         XCTAssertTrue(response!.contains(#""tools":{"listChanged":false}"#))
+    }
+
+    func testInitializeResponseContainsComputerUseInstructions() throws {
+        let server = StdioMCPServer(service: ComputerUseService())
+        let response = try XCTUnwrap(
+            server.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test","version":"0.1.2"},"capabilities":{}}}"#)
+        )
+        let data = try XCTUnwrap(response.data(using: .utf8))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let result = try XCTUnwrap(json["result"] as? [String: Any])
+        let instructions = try XCTUnwrap(result["instructions"] as? String)
+
+        XCTAssertEqual(instructions, computerUseServerInstructions)
     }
 
     func testWindowRelativeFrameUsesSharedGlobalCoordinates() {
@@ -35,22 +49,60 @@ final class OpenComputerUseKitTests: XCTestCase {
 
         XCTAssertEqual(
             tools["get_app_state"]?.description,
-            "Start an app use session if needed, then get the state of the app's key window and return a screenshot and accessibility tree. This must be called once per assistant turn before interacting with the app."
+            "Start an app use session if needed, then get the state of the app's key window and return a screenshot and accessibility tree. This must be called once per assistant turn before interacting with the app. This tool is part of plugin `Computer Use`."
         )
         XCTAssertTrue(tools["press_key"]?.description.contains("xdotool") == true)
         XCTAssertEqual(
-            (tools["click"]?.inputSchema["properties"] as? [String: [String: Any]])?["mouse_button"]?["default"] as? String,
-            "left"
+            tools["click"]?.annotations["destructiveHint"] as? Bool,
+            false
         )
         XCTAssertEqual(
-            (tools["click"]?.inputSchema["properties"] as? [String: [String: Any]])?["click_count"]?["default"] as? Int,
-            1
+            tools["get_app_state"]?.annotations["readOnlyHint"] as? Bool,
+            true
         )
+        XCTAssertEqual(
+            tools["click"]?.inputSchema["additionalProperties"] as? Bool,
+            false
+        )
+        XCTAssertEqual(
+            ((tools["click"]?.inputSchema["properties"] as? [String: [String: Any]])?["mouse_button"]?["enum"] as? [String]) ?? [],
+            ["left", "right", "middle"]
+        )
+    }
+
+    func testSnapshotRenderedTextStartsDirectlyWithAppHeader() {
+        let snapshot = makeSnapshot(
+            treeLines: ["\t0 standard window Feishu"],
+            focusedSummary: "247 text entry area"
+        )
+
+        let rendered = snapshot.renderedText(style: .actionResult)
+        let lines = rendered.components(separatedBy: "\n")
+
+        XCTAssertEqual(lines.first, "App=com.electron.lark (pid 18465)")
+        XCTAssertEqual(lines.dropFirst().first, "Window: \"Feishu\", App: Feishu.")
+        XCTAssertFalse(rendered.contains("Computer Use state (CUA App Version: 750)"))
+        XCTAssertFalse(rendered.contains("<app_state>"))
+        XCTAssertFalse(rendered.contains("</app_state>"))
+    }
+
+    func testSnapshotSelectedTextUsesOfficialSingleLineFormat() {
+        let snapshot = makeSnapshot(
+            treeLines: ["\t38 search text field (settable, string) Codex"],
+            focusedSummary: nil,
+            selectedText: "Codex"
+        )
+
+        let rendered = snapshot.renderedText(style: .actionResult)
+
+        XCTAssertTrue(rendered.contains("Selected text: [Codex]"))
+        XCTAssertFalse(rendered.contains("Selected text: ```"))
+        XCTAssertFalse(rendered.contains("Pay special attention to the content selected by the user"))
     }
 
     func testComputerUseErrorsFormatLikeToolText() {
         XCTAssertEqual(ComputerUseError.appNotFound("Sublime Text").errorDescription, #"appNotFound("Sublime Text")"#)
-        XCTAssertFalse(ComputerUseError.appNotFound("Sublime Text").toolResultIsError)
+        XCTAssertTrue(ComputerUseError.appNotFound("Sublime Text").toolResultIsError)
         XCTAssertTrue(ComputerUseError.invalidArguments("bad").toolResultIsError)
     }
 
@@ -84,5 +136,26 @@ final class OpenComputerUseKitTests: XCTestCase {
         let midpoint = path.point(at: 0.5)
         XCTAssertNotEqual(midpoint.x, 110)
         XCTAssertNotEqual(midpoint.y, 70)
+    }
+
+    private func makeSnapshot(treeLines: [String], focusedSummary: String?, selectedText: String? = nil) -> AppSnapshot {
+        AppSnapshot(
+            app: RunningAppDescriptor(
+                name: "Feishu",
+                bundleIdentifier: "com.electron.lark",
+                pid: 18_465,
+                runningApplication: NSRunningApplication.current
+            ),
+            windowTitle: "Feishu",
+            windowBounds: nil,
+            targetWindowID: nil,
+            targetWindowLayer: nil,
+            screenshotPNGData: nil,
+            mode: .accessibility,
+            treeLines: treeLines,
+            focusedSummary: focusedSummary,
+            selectedText: selectedText,
+            elements: [:]
+        )
     }
 }

@@ -9,11 +9,8 @@ public final class ComputerUseService {
 
     public func listApps() -> ToolCallResult {
         ToolCallResult.text(
-            AppDiscovery.listApps()
-                .map { descriptor in
-                    let bundle = descriptor.bundleIdentifier ?? "no-bundle-id"
-                    return "\(descriptor.name) — \(bundle) [running, pid=\(descriptor.pid)]"
-                }
+            AppDiscovery.listCatalog()
+                .map(\.renderedLine)
                 .joined(separator: "\n")
         )
     }
@@ -458,7 +455,8 @@ public final class ComputerUseService {
 
     private func screenshotToGlobalPoint(snapshot: AppSnapshot, x: Double, y: Double) throws -> CGPoint {
         guard let windowBounds = snapshot.windowBounds else {
-            throw ComputerUseError.stateUnavailable("No window bounds are available for \(snapshot.app.name). Run get_app_state after bringing the app on screen.")
+            let appReference = snapshot.app.bundleIdentifier ?? snapshot.app.name
+            throw ComputerUseError.stateUnavailable("No window bounds are available for \(appReference). Run get_app_state after bringing the app on screen.")
         }
 
         return CGPoint(x: windowBounds.minX + x, y: windowBounds.minY + y)

@@ -37,3 +37,32 @@
 - `apps/OpenComputerUseSmokeSuite/Sources/OpenComputerUseSmokeSuite/main.swift`
 - `docs/ARCHITECTURE.md`
 - `docs/SECURITY.md`
+
+### 🔁 Follow-up | 2026-04-17 19:01
+
+**Additional Actions:**
+- **[Official source discovery]**: 继续通过 `computer-use-cli` 和本机二进制字符串检查，确认官方 `list_apps` 的 `uses`/排序来自 Spotlight metadata 的 `kMDItemUseCount` 与 `kMDItemLastUsedDate_Ranking`，而不是 `Knowledge/knowledgeC.db`。
+- **[App list exact match]**: 重写 `AppDiscovery` 的 app catalog 逻辑，按标准 application scope 做 metadata query，再和运行中 app 合并；本机实测 `list_apps` 与官方当前输出做到无 diff。
+- **[Safety parity]**: 新增一层官方风格的高风险 bundle denylist，让 `iTerm2` 这类 name query 返回 `appNotFound(...)`、bundle-id query 返回 safety denial，和官方边界行为对齐。
+- **[State rendering tightening]**: 继续收口 `get_app_state` 的 AX 渲染顺序、traits/value 文案、toolbar/group 展示与 secondary action 过滤；复杂 outline 场景已明显更接近官方，但 Activity Monitor 这类样本仍有少量尾部细节差异。
+- **[Docs sync]**: 同步更新架构、安全、质量和 execution plan 文档，避免仓库继续保留已失效的 `Knowledge` 推测和“尚无安全策略”的旧说法。
+
+**Extra Files Modified:**
+- `packages/OpenComputerUseKit/Sources/OpenComputerUseKit/AppDiscovery.swift`
+- `packages/OpenComputerUseKit/Sources/OpenComputerUseKit/AccessibilitySnapshot.swift`
+- `docs/QUALITY_SCORE.md`
+- `docs/exec-plans/active/20260417-official-tool-alignment.md`
+
+### 🔁 Follow-up | 2026-04-17 20:30
+
+**Additional Actions:**
+- **[State text prefix tightening]**: 把 `get_app_state` / action tool 的文本头部进一步收口到直接从 `App=<bundle-id> (pid ...)` 开始，不再输出 `Computer Use state (CUA App Version: 750)` 或 `<app_state>` 包裹。
+- **[Selected text formatting parity]**: 把选中文本从我们自己的 code fence + explanatory note 改成官方当前更接近的单行 `Selected text: [...]` 形式。
+- **[Canonical app identifier in errors]**: 对依赖 window bounds 的错误提示优先输出 bundle identifier，减少后续 tool 调用又漂回应用名。
+- **[Regression coverage]**: 新增单测锁定 state 文本起始格式和 `Selected text` 渲染，避免后续重构把这些差异带回来。
+- **[Reference correction]**: 更新仓库内 reverse-engineering 样本文档，明确当前应以直接 MCP `content[0].text` 的 `App=...` 起始格式作为官方基线。
+
+**Extra Files Modified:**
+- `packages/OpenComputerUseKit/Sources/OpenComputerUseKit/ComputerUseService.swift`
+- `packages/OpenComputerUseKit/Tests/OpenComputerUseKitTests/OpenComputerUseKitTests.swift`
+- `docs/references/codex-computer-use-reverse-engineering/tool-call-samples-2026-04-17.md`

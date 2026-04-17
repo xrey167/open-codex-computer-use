@@ -26,12 +26,7 @@ public enum ComputerUseError: Error, LocalizedError {
     }
 
     var toolResultIsError: Bool {
-        switch self {
-        case .unsupportedTool, .invalidArguments:
-            return true
-        case .message, .appNotFound, .permissionDenied, .stateUnavailable:
-            return false
-        }
+        true
     }
 }
 
