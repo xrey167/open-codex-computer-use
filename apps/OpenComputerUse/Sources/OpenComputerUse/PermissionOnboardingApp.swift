@@ -937,26 +937,62 @@ enum Branding {
         image.lockFocus()
 
         let rect = CGRect(origin: .zero, size: image.size)
-        let path = NSBezierPath(roundedRect: rect, xRadius: size * 0.22, yRadius: size * 0.22)
+        let tile = NSBezierPath(roundedRect: rect, xRadius: size * 0.22, yRadius: size * 0.22)
 
         let gradient = NSGradient(colors: [
             NSColor(calibratedRed: 0.12, green: 0.67, blue: 0.99, alpha: 1),
             NSColor(calibratedRed: 0.94, green: 0.74, blue: 0.93, alpha: 1),
         ])!
-        gradient.draw(in: path, angle: 20)
+        gradient.draw(in: tile, angle: 20)
 
-        NSColor.white.withAlphaComponent(0.18).setFill()
-        NSBezierPath(ovalIn: CGRect(x: size * 0.1, y: size * 0.5, width: size * 0.62, height: size * 0.42)).fill()
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: size * x / 256, y: size * (1 - y / 256))
+        }
 
-        let glyph = NSBezierPath()
-        glyph.move(to: CGPoint(x: size * 0.36, y: size * 0.72))
-        glyph.curve(to: CGPoint(x: size * 0.7, y: size * 0.58), controlPoint1: CGPoint(x: size * 0.48, y: size * 0.78), controlPoint2: CGPoint(x: size * 0.63, y: size * 0.69))
-        glyph.curve(to: CGPoint(x: size * 0.44, y: size * 0.3), controlPoint1: CGPoint(x: size * 0.82, y: size * 0.48), controlPoint2: CGPoint(x: size * 0.6, y: size * 0.28))
-        glyph.curve(to: CGPoint(x: size * 0.26, y: size * 0.62), controlPoint1: CGPoint(x: size * 0.28, y: size * 0.32), controlPoint2: CGPoint(x: size * 0.18, y: size * 0.5))
-        glyph.close()
+        func scale(_ value: CGFloat) -> CGFloat {
+            size * value / 256
+        }
 
-        NSColor.white.withAlphaComponent(0.78).setFill()
-        glyph.fill()
+        let arc = NSBezierPath()
+        arc.move(to: point(74, 156))
+        arc.curve(
+            to: point(182, 88),
+            controlPoint1: point(78, 112),
+            controlPoint2: point(136, 72)
+        )
+        arc.lineWidth = scale(12)
+        arc.lineCapStyle = .round
+        NSColor.white.withAlphaComponent(0.72).setStroke()
+        arc.stroke()
+
+        let pointerShadow = NSBezierPath()
+        pointerShadow.move(to: point(129, 102))
+        pointerShadow.line(to: point(129, 181))
+        pointerShadow.line(to: point(149, 162))
+        pointerShadow.line(to: point(161, 193))
+        pointerShadow.line(to: point(176, 186))
+        pointerShadow.line(to: point(164, 157))
+        pointerShadow.line(to: point(192, 152))
+        pointerShadow.close()
+        NSColor.white.withAlphaComponent(0.14).setFill()
+        pointerShadow.fill()
+
+        let pointer = NSBezierPath()
+        pointer.move(to: point(126, 98))
+        pointer.line(to: point(126, 177))
+        pointer.line(to: point(146, 158))
+        pointer.line(to: point(158, 189))
+        pointer.line(to: point(173, 182))
+        pointer.line(to: point(161, 153))
+        pointer.line(to: point(189, 148))
+        pointer.close()
+        pointer.lineWidth = scale(6)
+        pointer.lineJoinStyle = .round
+        pointer.lineCapStyle = .round
+        NSColor.white.withAlphaComponent(0.94).setFill()
+        pointer.fill()
+        NSColor.white.setStroke()
+        pointer.stroke()
 
         image.unlockFocus()
         return image
