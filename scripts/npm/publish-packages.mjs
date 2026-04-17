@@ -121,11 +121,20 @@ function main() {
     if (options.dryRun) {
       args.push("--dry-run");
     }
-    run("npm", args, {
-      env: {
-        ...process.env,
-      },
-    });
+    const npmEnv = {
+      ...process.env,
+    };
+
+    // npm prefers GitHub Actions OIDC when the runner exposes it. If we
+    // explicitly provided an npm token fallback, clear the OIDC env so publish
+    // actually uses the token path.
+    if (process.env.NODE_AUTH_TOKEN) {
+      delete npmEnv.ACTIONS_ID_TOKEN_REQUEST_URL;
+      delete npmEnv.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      delete npmEnv.NPM_ID_TOKEN;
+    }
+
+    run("npm", args, { env: npmEnv });
   }
 }
 

@@ -251,7 +251,7 @@ function renderPackageJson(packageName, version) {
     homepage: "https://github.com/iFurySt/open-codex-computer-use",
     repository: {
       type: "git",
-      url: "git+https://github.com/iFurySt/open-codex-computer-use.git",
+      url: "https://github.com/iFurySt/open-codex-computer-use",
     },
     bugs: {
       url: "https://github.com/iFurySt/open-codex-computer-use/issues",
