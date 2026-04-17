@@ -73,7 +73,7 @@
 
 - 2026-04-17：权限 onboarding 直接做进 `OpenComputerUse` 主 target，而不是另起一个完全独立的 helper app。这样 `mcp` CLI 和 app bundle 可复用同一个可执行文件与 bundle 身份。
 - 2026-04-17：权限状态判定加入对 TCC 持久授权记录的读取，避免 dev 环境里 CLI 子进程与 GUI app 对同一 bundle 权限状态看到不一致的结果。
-- 2026-04-17：drag panel 当前收敛到“只在 `System Settings` 前台时显示，并锚到 `Add` / `Remove` 控制区”的近似方案；更接近官方嵌入式 choreography 的视觉行为后续再补。
+- 2026-04-17：drag panel 仍然只在 `System Settings` 前台时显示，但定位策略已从 `Add` / `Remove` 控制区改成跟随主窗口右侧内容区的底边，避免 panel 被列表局部控件牵着跑。
 - 2026-04-17：app 模式改成 `LSUIElement` + `.accessory` agent-style 运行，保证权限窗口可见，但执行过程中不再额外在 Dock 暴露前台 app 图标。
 
 ## 当前结论

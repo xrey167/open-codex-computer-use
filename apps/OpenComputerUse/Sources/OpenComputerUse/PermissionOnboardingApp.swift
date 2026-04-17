@@ -1,4 +1,3 @@
-import ApplicationServices
 import AppKit
 import OpenComputerUseKit
 
@@ -415,6 +414,17 @@ final class PermissionAccessoryPanelController {
     private var globalDragMonitor: Any?
     private var localDragMonitor: Any?
 
+    private enum Layout {
+        static let screenHorizontalInset: CGFloat = 16
+        static let screenBottomInset: CGFloat = 12
+        static let windowBottomOverlap: CGFloat = 6
+        static let contentLeadingInset: CGFloat = 26
+        static let contentTrailingInset: CGFloat = 28
+        static let sidebarWidthRatio: CGFloat = 0.29
+        static let sidebarWidthMin: CGFloat = 214
+        static let sidebarWidthMax: CGFloat = 272
+    }
+
     func show(for permission: SystemPermissionKind) {
         currentPermission = permission
 
@@ -549,26 +559,43 @@ final class PermissionAccessoryPanelController {
     }
 
     private func preferredPanelOrigin(for panelSize: CGSize) -> CGPoint? {
-        guard let anchor = systemSettingsControlAnchorRect() else {
-            return fallbackPanelOrigin(for: panelSize)
-        }
-
-        let visibleFrame = targetVisibleScreenFrame(for: anchor) ?? NSScreen.main?.visibleFrame ?? .zero
-        let x = clamp(anchor.minX - 18, lower: visibleFrame.minX + 16, upper: visibleFrame.maxX - panelSize.width - 16)
-        let y = max(visibleFrame.minY + 12, anchor.minY - panelSize.height - 10)
-        return CGPoint(x: x, y: y)
-    }
-
-    private func fallbackPanelOrigin(for panelSize: CGSize) -> CGPoint? {
         guard let referenceRect = systemSettingsWindowBounds() ?? NSScreen.main?.visibleFrame else {
             return nil
         }
 
         let visibleFrame = targetVisibleScreenFrame(for: referenceRect) ?? referenceRect
-        let estimatedControlsMinX = referenceRect.minX + 234
-        let x = clamp(estimatedControlsMinX - 18, lower: visibleFrame.minX + 16, upper: visibleFrame.maxX - panelSize.width - 16)
-        let y = max(visibleFrame.minY + 12, referenceRect.minY - panelSize.height + 6)
+        let trackRect = systemSettingsContentTrackRect(in: referenceRect)
+        let x = clamp(
+            trackRect.midX - (panelSize.width / 2),
+            lower: visibleFrame.minX + Layout.screenHorizontalInset,
+            upper: visibleFrame.maxX - panelSize.width - Layout.screenHorizontalInset
+        )
+        let y = max(
+            visibleFrame.minY + Layout.screenBottomInset,
+            referenceRect.minY - panelSize.height + Layout.windowBottomOverlap
+        )
         return CGPoint(x: x, y: y)
+    }
+
+    private func systemSettingsContentTrackRect(in windowBounds: CGRect) -> CGRect {
+        // Track the System Settings window itself instead of the +/- controls so
+        // the accessory panel stays stable while the page contents relayout.
+        let sidebarWidth = clamp(
+            windowBounds.width * Layout.sidebarWidthRatio,
+            lower: Layout.sidebarWidthMin,
+            upper: Layout.sidebarWidthMax
+        )
+        let contentMinX = min(
+            windowBounds.maxX - Layout.contentTrailingInset - 1,
+            windowBounds.minX + sidebarWidth + Layout.contentLeadingInset
+        )
+        let contentMaxX = max(contentMinX + 1, windowBounds.maxX - Layout.contentTrailingInset)
+        return CGRect(
+            x: contentMinX,
+            y: windowBounds.minY,
+            width: contentMaxX - contentMinX,
+            height: windowBounds.height
+        )
     }
 
     private func targetVisibleScreenFrame(for rect: CGRect) -> CGRect? {
@@ -585,45 +612,6 @@ final class PermissionAccessoryPanelController {
         }
 
         return min(max(value, lower), upper)
-    }
-
-    private func systemSettingsControlAnchorRect() -> CGRect? {
-        guard PermissionDiagnostics.current().accessibilityTrusted else {
-            return nil
-        }
-
-        guard
-            let appElement = systemSettingsApplicationElement(),
-            let root = focusedSystemSettingsWindow(for: appElement) ?? firstWindow(for: appElement)
-        else {
-            return nil
-        }
-
-        let controlFrames = descendantFrames(
-            in: root,
-            matchingTitles: ["Add", "Remove"],
-            role: kAXButtonRole as String
-        )
-
-        guard !controlFrames.isEmpty else {
-            return nil
-        }
-
-        let groups = Dictionary(grouping: controlFrames) { frame in
-            Int((frame.midY / 12).rounded(.toNearestOrAwayFromZero))
-        }
-
-        guard let topGroup = groups.values.max(by: { lhs, rhs in
-            let lhsTop = lhs.map(\.maxY).max() ?? 0
-            let rhsTop = rhs.map(\.maxY).max() ?? 0
-            return lhsTop < rhsTop
-        }) else {
-            return nil
-        }
-
-        return topGroup.reduce(topGroup[0]) { partial, frame in
-            partial.union(frame)
-        }
     }
 
     private func systemSettingsWindowBounds() -> CGRect? {
@@ -651,139 +639,6 @@ final class PermissionAccessoryPanelController {
         }
 
         return windows.sorted(by: { $0.1 > $1.1 }).first?.0
-    }
-
-    private func systemSettingsApplicationElement() -> AXUIElement? {
-        guard let runningApp = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.systempreferences" }) else {
-            return nil
-        }
-
-        return AXUIElementCreateApplication(runningApp.processIdentifier)
-    }
-
-    private func focusedSystemSettingsWindow(for appElement: AXUIElement) -> AXUIElement? {
-        let systemWide = AXUIElementCreateSystemWide()
-
-        if
-            let focusedApp = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute),
-            pid(of: focusedApp) == pid(of: appElement)
-        {
-            return copyElement(systemWide, attribute: kAXFocusedWindowAttribute)
-                ?? copyElement(focusedApp, attribute: kAXFocusedWindowAttribute)
-                ?? firstWindow(for: focusedApp)
-        }
-
-        return copyElement(appElement, attribute: kAXFocusedWindowAttribute)
-    }
-
-    private func firstWindow(for appElement: AXUIElement) -> AXUIElement? {
-        copyArray(appElement, attribute: kAXWindowsAttribute)?.first
-    }
-
-    private func descendantFrames(in root: AXUIElement, matchingTitles titles: Set<String>, role targetRole: String) -> [CGRect] {
-        var results: [CGRect] = []
-        var queue: [AXUIElement] = [root]
-        var visited: Set<CFHashCode> = []
-
-        while let element = queue.first {
-            queue.removeFirst()
-
-            let token = CFHash(element)
-            guard !visited.contains(token) else {
-                continue
-            }
-            visited.insert(token)
-
-            if
-                stringValue(of: element, attribute: kAXRoleAttribute) == targetRole,
-                let title = stringValue(of: element, attribute: kAXTitleAttribute),
-                titles.contains(title),
-                let frame = frame(of: element)
-            {
-                results.append(frame)
-            }
-
-            queue.append(contentsOf: childElements(of: element))
-        }
-
-        return results
-    }
-
-    private func childElements(of element: AXUIElement) -> [AXUIElement] {
-        let attributes = [kAXChildrenAttribute, kAXRowsAttribute]
-        var children: [AXUIElement] = []
-
-        for attribute in attributes {
-            if let nested = copyArray(element, attribute: attribute) {
-                children.append(contentsOf: nested)
-            }
-        }
-
-        return children
-    }
-
-    private func copyElement(_ element: AXUIElement, attribute: String) -> AXUIElement? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
-            return nil
-        }
-
-        guard let value else {
-            return nil
-        }
-
-        return (value as! AXUIElement)
-    }
-
-    private func copyArray(_ element: AXUIElement, attribute: String) -> [AXUIElement]? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
-            return nil
-        }
-
-        return value as? [AXUIElement]
-    }
-
-    private func stringValue(of element: AXUIElement, attribute: String) -> String? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
-            return nil
-        }
-
-        return value as? String
-    }
-
-    private func frame(of element: AXUIElement) -> CGRect? {
-        var positionValue: CFTypeRef?
-        var sizeValue: CFTypeRef?
-
-        guard
-            AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
-            AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
-            let positionValue,
-            let sizeValue
-        else {
-            return nil
-        }
-
-        let positionAXValue = positionValue as! AXValue
-        let sizeAXValue = sizeValue as! AXValue
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        guard
-            AXValueGetValue(positionAXValue, .cgPoint, &position),
-            AXValueGetValue(sizeAXValue, .cgSize, &size)
-        else {
-            return nil
-        }
-
-        return CGRect(origin: position, size: size)
-    }
-
-    private func pid(of element: AXUIElement) -> pid_t {
-        var processIdentifier: pid_t = 0
-        AXUIElementGetPid(element, &processIdentifier)
-        return processIdentifier
     }
 }
 
