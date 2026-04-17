@@ -53,4 +53,36 @@ final class OpenComputerUseKitTests: XCTestCase {
         XCTAssertFalse(ComputerUseError.appNotFound("Sublime Text").toolResultIsError)
         XCTAssertTrue(ComputerUseError.invalidArguments("bad").toolResultIsError)
     }
+
+    func testVisualCursorEnvFlagDefaultsToEnabled() {
+        XCTAssertTrue(visualCursorEnabled(environment: [:]))
+        XCTAssertTrue(visualCursorEnabled(environment: ["OPEN_COMPUTER_USE_VISUAL_CURSOR": "1"]))
+        XCTAssertFalse(visualCursorEnabled(environment: ["OPEN_COMPUTER_USE_VISUAL_CURSOR": "0"]))
+        XCTAssertFalse(visualCursorEnabled(environment: ["OPEN_COMPUTER_USE_VISUAL_CURSOR": "false"]))
+    }
+
+    func testCursorWindowGeometryAnchorsTipPosition() {
+        let geometry = CursorWindowGeometry(
+            windowSize: CGSize(width: 128, height: 128),
+            tipAnchor: CGPoint(x: 44, y: 88)
+        )
+        let tipPosition = CGPoint(x: 1200, y: 800)
+
+        XCTAssertEqual(geometry.origin(forTipPosition: tipPosition), CGPoint(x: 1156, y: 712))
+        XCTAssertEqual(geometry.tipPosition(forOrigin: CGPoint(x: 1156, y: 712)), tipPosition)
+    }
+
+    func testCursorMotionPathStartsAndEndsAtExpectedPoints() {
+        let path = CursorMotionPath(
+            start: CGPoint(x: 10, y: 20),
+            end: CGPoint(x: 210, y: 120)
+        )
+
+        XCTAssertEqual(path.point(at: 0), CGPoint(x: 10, y: 20))
+        XCTAssertEqual(path.point(at: 1), CGPoint(x: 210, y: 120))
+
+        let midpoint = path.point(at: 0.5)
+        XCTAssertNotEqual(midpoint.x, 110)
+        XCTAssertNotEqual(midpoint.y, 70)
+    }
 }

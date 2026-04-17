@@ -45,24 +45,58 @@ public final class ComputerUseService {
 
         if let elementIndex {
             let record = try lookupElement(snapshot: snapshot, index: elementIndex)
-
-            if try performPreferredClick(on: record, button: button, clickCount: clickCount) {
-                Thread.sleep(forTimeInterval: 0.15)
-            } else if let point = try globalPoint(for: record, snapshot: snapshot) {
-                InputSimulation.prepareAppForGlobalPointerInput(snapshot.app)
-                try InputSimulation.clickGlobally(at: point, button: button, clickCount: clickCount)
-            } else {
+            guard let targetPoint = try globalPoint(for: record, snapshot: snapshot) else {
                 throw ComputerUseError.stateUnavailable("element \(elementIndex) has no clickable frame")
+            }
+            let targetWindow = cursorTargetWindow(for: snapshot)
+
+            VisualCursorSupport.performOnMain {
+                SoftwareCursorOverlay.moveCursor(to: targetPoint, in: targetWindow)
+            }
+
+            do {
+                if try performPreferredClick(on: record, button: button, clickCount: clickCount) {
+                    Thread.sleep(forTimeInterval: 0.15)
+                } else {
+                    InputSimulation.prepareAppForGlobalPointerInput(snapshot.app)
+                    try InputSimulation.clickGlobally(at: targetPoint, button: button, clickCount: clickCount)
+                }
+            } catch {
+                VisualCursorSupport.performOnMain {
+                    SoftwareCursorOverlay.settle(at: targetPoint, in: targetWindow)
+                }
+                throw error
+            }
+
+            VisualCursorSupport.performOnMain {
+                SoftwareCursorOverlay.pulseClick(at: targetPoint, clickCount: clickCount, mouseButton: button, in: targetWindow)
             }
         } else if let x, let y {
             let point = CGPoint(x: x, y: y)
+            let targetPoint = try screenshotToGlobalPoint(snapshot: snapshot, x: x, y: y)
+            let targetWindow = cursorTargetWindow(for: snapshot)
 
-            if let record = try hitTestElement(at: point, in: snapshot) ?? bestElement(containing: point, in: snapshot),
-               try performPreferredClick(on: record, button: button, clickCount: clickCount) {
-                Thread.sleep(forTimeInterval: 0.15)
-            } else {
-                InputSimulation.prepareAppForGlobalPointerInput(snapshot.app)
-                try InputSimulation.clickGlobally(at: try screenshotToGlobalPoint(snapshot: snapshot, x: x, y: y), button: button, clickCount: clickCount)
+            VisualCursorSupport.performOnMain {
+                SoftwareCursorOverlay.moveCursor(to: targetPoint, in: targetWindow)
+            }
+
+            do {
+                if let record = try hitTestElement(at: point, in: snapshot) ?? bestElement(containing: point, in: snapshot),
+                   try performPreferredClick(on: record, button: button, clickCount: clickCount) {
+                    Thread.sleep(forTimeInterval: 0.15)
+                } else {
+                    InputSimulation.prepareAppForGlobalPointerInput(snapshot.app)
+                    try InputSimulation.clickGlobally(at: targetPoint, button: button, clickCount: clickCount)
+                }
+            } catch {
+                VisualCursorSupport.performOnMain {
+                    SoftwareCursorOverlay.settle(at: targetPoint, in: targetWindow)
+                }
+                throw error
+            }
+
+            VisualCursorSupport.performOnMain {
+                SoftwareCursorOverlay.pulseClick(at: targetPoint, clickCount: clickCount, mouseButton: button, in: targetWindow)
             }
         } else {
             throw ComputerUseError.invalidArguments("click requires either element_index or x/y")
@@ -444,6 +478,17 @@ public final class ComputerUseService {
         }
 
         return identifier
+    }
+
+    private func cursorTargetWindow(for snapshot: AppSnapshot) -> CursorTargetWindow? {
+        guard let windowID = snapshot.targetWindowID else {
+            return nil
+        }
+
+        return CursorTargetWindow(
+            windowID: windowID,
+            layer: snapshot.targetWindowLayer ?? 0
+        )
     }
 
     private func snapshotResult(for snapshot: AppSnapshot, style: SnapshotTextStyle) -> ToolCallResult {

@@ -16,6 +16,7 @@
   - app discovery
   - Accessibility / 窗口 snapshot
   - 键鼠输入模拟
+  - software cursor overlay
   - fixture test bridge
 - `scripts/`
   仓库级自动化命令，包括 smoke test、`.app` 打包入口，以及 `scripts/computer-use-cli/` 这个用于探测官方 bundled `computer-use` 的 Go helper。
@@ -35,6 +36,7 @@
 ### 2. MCP 层
 
 - 当前只实现 `stdio` transport。
+- 当 `OPEN_COMPUTER_USE_VISUAL_CURSOR` 未被显式关闭时，`mcp` 命令会切到一个最小 AppKit runtime：主线程保留 event loop 承载 overlay UI，stdio server 仍在后台线程串行读取与响应。
 - 请求 framing 采用一行一个 JSON-RPC message。
 - 当前支持的 method：
   - `initialize`
@@ -50,6 +52,9 @@
 - `get_app_state` 优先走真实 AX / 窗口截图，但不再为了读状态而显式 `activate` 目标 app；当目标是仓库内 fixture app 时，回退到 fixture 导出的合成状态。
 - MCP `tools/list` 的 description / input schema 当前按官方 `computer-use` 的 9 个 tools 文案和参数面收敛，尽量减少 host 侧提示词和 tool surface 偏差。
 - 普通 app 的 element frame 当前按“窗口左上角为原点”的 window-relative 坐标输出，便于后续把 `element_index` 和截图坐标统一到同一套参考系。
+- `click` 在执行真实动作前后，会额外驱动一层透明 `SoftwareCursorOverlay` window：移动阶段走曲线动画，点击阶段做 pulse，动作结束后只保留一小段停驻与轻微 sway，随后自动淡出。
+- overlay 的 visual style 优先在运行时从本机官方 `Codex Computer Use.app` 的 `Package_ComputerUse.bundle` / `Package_SlimCore.bundle` 读取 `SoftwareCursor` 资产并做一次本地处理；如果本机没有这份 bundle，则回退到仓库内的矢量样式。
+- overlay 的层级不再固定 `.floating`；现在会跟随 snapshot 命中的目标 window id / layer，把自己排到该目标 window 之上，而不是粗暴压到所有前台 app 最上层。
 - 动作型 tools 对普通 app 采用“非侵入优先，HID 兜底”策略：
   - `AXUIElementPerformAction`
   - `AXUIElementSetAttributeValue`
@@ -66,9 +71,9 @@
 
 ## 关键边界
 
-- 开源版当前不复刻官方闭源实现里的 caller signing、私有 IPC、overlay UI 和 plugin 自安装逻辑。
+- 开源版当前不复刻官方闭源实现里的 caller signing、私有 IPC、完整 overlay choreography 和 plugin 自安装逻辑。
 - 因为官方 `SkyComputerUseClient` 带有宿主侧 launch constraints，普通 stdio MCP client 在本机上可能被系统直接杀掉；如果要探测官方 bundled `computer-use`，默认应通过 `scripts/computer-use-cli` 的 app-server 模式走已签名的 Codex 宿主。
-- 当前权限引导已经具备可运行 app、深链和拖拽辅助，但还没有完全复刻官方那套嵌入式 choreography / overlay 体验。
+- 当前权限引导已经具备可运行 app、深链和拖拽辅助；点击链路也已经补上独立 visual cursor、官方 asset fallback 和相对目标 window 的排序逻辑，但整体还没有完全复刻官方那套嵌入式 choreography / host 集成 / session approval 体验。
 - screenshot 当前使用系统窗口截图 API，但默认直接以 MCP `image` content block 的 base64 PNG 返回，不再把普通 app 截图落盘到仓库或临时目录。
 - 会话状态现在是进程内内存态，保存每个 app 最近一次 snapshot 和 element index 映射。
 

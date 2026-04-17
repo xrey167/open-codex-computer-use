@@ -10,7 +10,14 @@ enum OpenComputerUseMain {
 
         switch arguments.first {
         case "mcp":
-            try StdioMCPServer(service: service).run()
+            let server = StdioMCPServer(service: service)
+            if VisualCursorSupport.isEnabled {
+                try MainActor.assumeIsolated {
+                    try MCPAppRuntime.run(server: server)
+                }
+            } else {
+                try server.run()
+            }
         case "doctor":
             let permissions = PermissionDiagnostics.current()
             print(permissions.summary)

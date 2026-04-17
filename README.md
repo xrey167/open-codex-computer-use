@@ -7,7 +7,7 @@
 当前版本聚焦两件事：
 
 - 通过 `stdio` MCP 暴露 9 个和官方 `computer-use` 同名的 tools。
-- 在仓库内自带一个 GUI fixture app、smoke suite 和无 Dock 图标的 app 模式权限引导，保证这 9 个 tools 有稳定可回归的本地验证路径。
+- 在仓库内自带一个 GUI fixture app、smoke suite 和无 Dock 图标的 app 模式权限引导，并为 `click` 补一层独立 visual cursor overlay，保证这 9 个 tools 有稳定可回归的本地验证路径。
 
 当前实现的 9 个 tools：
 
@@ -48,6 +48,12 @@ open dist/OpenComputerUse.app
 
 ```bash
 .build/debug/OpenComputerUse mcp
+```
+
+如果你想临时关闭点击时的软件 cursor overlay，可以显式传：
+
+```bash
+OPEN_COMPUTER_USE_VISUAL_CURSOR=0 .build/debug/OpenComputerUse mcp
 ```
 
 安装到本机 Codex 插件系统：
@@ -166,8 +172,11 @@ https://chatgpt.com/backend-api/codex/responses
 ## 当前取舍
 
 - 普通 app 路径优先走 macOS Accessibility、窗口截图和 CGEvent 输入事件。
+- `click` 现在会额外拉起一层独立的软件 cursor overlay，用来给用户提供移动轨迹、点击 pulse 和短暂停留；它是可视化层，不改变底层 AX/HID 的动作决策，并会在动作结束后自动消失。
+- overlay 会优先在运行时从本机官方 `Codex Computer Use.app` 的 bundle 里读取 `SoftwareCursor` 资产并做一次轻量处理；如果本机没有官方 bundle，再回退到仓库内的矢量绘制样式。
+- overlay 不再固定置顶，而是尽量按目标 window 的编号和层级排到“目标 app 之上、其他当前更高层窗口之下”的位置。
 - fixture app 为了提供稳定回归，会额外导出一份合成状态，并接受测试专用 command bridge。
-- 当前不复刻官方闭源 app 的签名边界、私有 IPC、overlay UI 和插件自安装逻辑。
+- 当前不复刻官方闭源 app 的签名边界、私有 IPC、完整 overlay choreography 和插件自安装逻辑。
 
 ## 许可证
 

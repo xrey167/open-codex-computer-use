@@ -30,6 +30,8 @@ public struct AppSnapshot {
     public let app: RunningAppDescriptor
     public let windowTitle: String?
     public let windowBounds: CGRect?
+    let targetWindowID: CGWindowID?
+    let targetWindowLayer: Int?
     public let screenshotPNGData: Data?
     let mode: SnapshotMode
     let treeLines: [String]
@@ -101,6 +103,8 @@ enum SnapshotBuilder {
             app: app,
             windowTitle: windowTitle,
             windowBounds: windowBounds,
+            targetWindowID: windowCapture?.windowID,
+            targetWindowLayer: windowCapture?.layer,
             screenshotPNGData: screenshotPNGData,
             mode: .accessibility,
             treeLines: renderer.lines,
@@ -172,6 +176,8 @@ enum SnapshotBuilder {
             app: app,
             windowTitle: state.windowTitle,
             windowBounds: state.windowBounds.cgRect,
+            targetWindowID: nil,
+            targetWindowLayer: nil,
             screenshotPNGData: nil,
             mode: .fixture,
             treeLines: lines,
@@ -182,6 +188,8 @@ enum SnapshotBuilder {
 }
 
 private struct WindowCapture {
+    let windowID: CGWindowID
+    let layer: Int
     let bounds: CGRect
     let image: CGImage?
 
@@ -190,13 +198,12 @@ private struct WindowCapture {
             return nil
         }
 
-        let candidates = infoList.compactMap { info -> (CGWindowID, CGRect, String?, Int)? in
+        let candidates = infoList.compactMap { info -> (CGWindowID, Int, CGRect, String?, Int)? in
             guard
                 let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t,
                 ownerPID == pid,
                 let number = info[kCGWindowNumber as String] as? NSNumber,
                 let layer = info[kCGWindowLayer as String] as? Int,
-                layer == 0,
                 let boundsDictionary = info[kCGWindowBounds as String] as? NSDictionary,
                 let bounds = CGRect(dictionaryRepresentation: boundsDictionary)
             else {
@@ -205,33 +212,33 @@ private struct WindowCapture {
 
             let title = info[kCGWindowName as String] as? String
             let area = Int(bounds.width * bounds.height)
-            return (CGWindowID(number.uint32Value), bounds, title, area)
+            return (CGWindowID(number.uint32Value), layer, bounds, title, area)
         }
 
         guard let best = candidates.sorted(by: { lhs, rhs in
             if let titleHint {
-                if lhs.2 == titleHint && rhs.2 != titleHint {
+                if lhs.3 == titleHint && rhs.3 != titleHint {
                     return true
                 }
 
-                if rhs.2 == titleHint && lhs.2 != titleHint {
+                if rhs.3 == titleHint && lhs.3 != titleHint {
                     return false
                 }
             }
 
-            return lhs.3 > rhs.3
+            return lhs.4 > rhs.4
         }).first else {
             return nil
         }
 
         let image = CGWindowListCreateImage(
-            best.1,
+            best.2,
             .optionIncludingWindow,
             best.0,
             [.bestResolution, .boundsIgnoreFraming]
         )
 
-        return WindowCapture(bounds: best.1, image: image)
+        return WindowCapture(windowID: best.0, layer: best.1, bounds: best.2, image: image)
     }
 
     func pngDataIfAvailable() -> Data? {
